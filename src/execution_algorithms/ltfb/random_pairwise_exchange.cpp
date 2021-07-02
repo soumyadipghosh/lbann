@@ -24,6 +24,8 @@
 // permissions and limitations under the license.
 ////////////////////////////////////////////////////////////////////////////////
 
+#include "lbann/execution_algorithms/ltfb/mutation_strategy.hpp"
+
 #include "lbann/execution_algorithms/ltfb/random_pairwise_exchange.hpp"
 
 #include "lbann/base.hpp"
@@ -134,23 +136,26 @@ bool local_wins(EvalType local,
 
 RandomPairwiseExchange::RandomPairwiseExchange(
   std::unordered_map<std::string, metric_strategy> metrics,
-  std::unique_ptr<ExchangeStrategy> comm_algo)
-  : m_metrics{std::move(metrics)}, m_comm_algo{std::move(comm_algo)}
+  std::unique_ptr<ExchangeStrategy> comm_algo,
+  std::unique_ptr<MutationStrategy> mutate_algo)
+  : m_metrics{std::move(metrics)}, m_comm_algo{std::move(comm_algo)}, m_mutate_algo{std::move(mutate_algo)}
 {
   LBANN_ASSERT(m_metrics.size());
 }
 
-RandomPairwiseExchange::RandomPairwiseExchange(
+RandomPairwiseExchange::RandomPairwiseExchange( // This calls the prev constructor
   std::string metric_name,
   metric_strategy winner_strategy,
-  std::unique_ptr<ExchangeStrategy> comm_algo)
+  std::unique_ptr<ExchangeStrategy> comm_algo,
+  std::unique_ptr<MutationStrategy> mutate_algo)
   : RandomPairwiseExchange({{metric_name, winner_strategy}},
-                           std::move(comm_algo))
+                           std::move(comm_algo), std::move(mutate_algo))
 {}
 
 RandomPairwiseExchange::RandomPairwiseExchange(
   RandomPairwiseExchange const& other)
-  : m_metrics{other.m_metrics}, m_comm_algo{other.m_comm_algo->clone()}
+  : m_metrics{other.m_metrics}, m_comm_algo{other.m_comm_algo->clone()},
+    m_mutate_algo{other.m_mutate_algo->clone()}
 {}
 
 std::unordered_map<std::string, EvalType>
@@ -307,6 +312,19 @@ void RandomPairwiseExchange::select_next(model& m,
     // FIXME (trb 03/18/21): This is ... not great. We need to
     // unravel the "fake" polymorphism in the model non-hierarchy
     // soon.
+    
+    // Dont copy partner model but mutate local losing model 
+    // Mutation Strategy decided by m_mutate_algo
+    m_mutate_algo->mutate(m);    
+
+    // Setup model and env again
+    auto& trainer = get_trainer();
+    auto&& metadata = trainer.get_data_coordinator().get_dr_metadata();
+    m.setup(trainer.get_max_mini_batch_size(),
+            metadata,
+            true);
+    
+    /*
     using DAGModel = directed_acyclic_graph_model;
     auto& local_model = dynamic_cast<DAGModel&>(m);
     auto& partner_dag_model = dynamic_cast<DAGModel&>(*partner_model);
@@ -315,9 +333,10 @@ void RandomPairwiseExchange::select_next(model& m,
     auto&& metadata = trainer.get_data_coordinator().get_dr_metadata();
     m.setup(trainer.get_max_mini_batch_size(),
             metadata,
-            /*force=*/true);
+            true);
+    */
   }
-
+ 
   LBANN_LOG_TRAINER_MASTER(comm,
                            message_prefix,
                            "trainer ",
