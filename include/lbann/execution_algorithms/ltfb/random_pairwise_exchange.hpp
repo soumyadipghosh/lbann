@@ -200,7 +200,6 @@ private:
    */
   std::unique_ptr<ExchangeStrategy> m_comm_algo;
 
-private:
   /** @brief The strategy for mutation of a model
    *  Note that the class is defined in src which is not a good idea
    *  Should move mutation_strategy.hpp here ?

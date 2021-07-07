@@ -23,14 +23,22 @@
 // implied. See the License for the specific language governing
 // permissions and limitations under the license.
 ////////////////////////////////////////////////////////////////////////////////
-#ifndef LBANN_SRC_EXECUTION_ALGORITHMS_LTFB_MUTATION_STRATEGY_COMMON_HPP_INCLUDED
-#define LBANN_SRC_EXECUTION_ALGORITHMS_LTFB_MUTATION_STRATEGY_COMMON_HPP_INCLUDED
+#ifndef LBANN_EXECUTION_ALGORITHMS_LTFB_MUTATION_STRATEGY_HPP_INCLUDED
+#define LBANN_EXECUTION_ALGORITHMS_LTFB_MUTATION_STRATEGY_HPP_INCLUDED
 
 #include "lbann/models/model.hpp"
+#include "lbann/layers/math/unary.hpp"
+
 // What else ?
 
-class MutationStrategy
+namespace lbann {
+namespace ltfb {
+
+class MutationStrategy : public Cloneable<HasAbstractFunction<MutationStrategy>>
 {
+public:
+  MutationStrategy() {};
+  virtual ~MutationStrategy() = default;
 
 public:
   /** @brief Apply a change to the model.
@@ -39,4 +47,58 @@ public:
   virtual void mutate(model& m) const = 0;
 };
 
-#endif // LBANN_SRC_EXECUTION_ALGORITHMS_LTFB_MUTATION_STRATEGY_COMMON_HPP_INCLUDED
+// No Mutation
+class NullMutation : public Cloneable<NullMutation, MutationStrategy>
+{
+
+public:
+  NullMutation() = default; 
+  void mutate(model&) const override {}
+};
+
+// Replace activation layers
+class ReplaceActivation : public Cloneable<ReplaceActivation, MutationStrategy>
+{
+
+public:
+  ReplaceActivation() = default;
+
+  std::unique_ptr<lbann::Layer> make_new_tanh_layer(lbann::lbann_comm& comm, std::string const& name)
+  {
+    auto layer = std::make_unique<
+      lbann::tanh_layer<float, data_layout::DATA_PARALLEL, El::Device::CPU>>(
+      &comm);
+    layer->set_name(name);
+    return layer;
+  }
+
+  void mutate(model& m)
+  {
+    auto& comm = *m.get_comm();
+
+    std::vector<std::string> all_relu;
+
+    // Find all relu
+    for (int i=0; i<m.get_num_layers(); ++i) {
+       if (m.get_layer(i).get_type() == "relu") {
+         all_relu.push_back(m.get_layer(i).get_name());
+       }
+    }
+
+    // Replace them with tanh
+    for (size_t i=0UL; i<all_relu.size(); i++) {
+       // make tanh with appropriate name
+       std::string new_tanh = "new_tanh" + std::to_string(i);
+
+       // Call replace for each of them
+       m.replace_layer(make_new_tanh_layer(comm, new_tanh), all_relu[i]);
+    }
+
+    // MODEL WILL BE SETUP IN RPE - NO NEED TO DO HERE
+  }
+};
+
+} // namespace ltfb
+
+} // namespace lbann
+#endif // LBANN_EXECUTION_ALGORITHMS_LTFB_MUTATION_STRATEGY_HPP_INCLUDED
