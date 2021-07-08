@@ -98,6 +98,19 @@ message RandomPairwiseExchange {
   }// message ExchangeStrategy
 }// message RandomPairwiseExchange
 
+message MutationStrategy {
+  message NullMutation {
+  }
+
+  message ReplaceActivation {
+  }
+
+  oneof strategy {
+    NullMutation null_mutation = 1;
+    ReplaceActivation replace_activation = 2;
+  }
+} //message Mutation Strategy
+
 message KFAC {
 
   SGD sgd = 1;
