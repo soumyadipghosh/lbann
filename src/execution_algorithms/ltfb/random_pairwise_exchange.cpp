@@ -312,6 +312,8 @@ void RandomPairwiseExchange::select_next(model& m,
     // FIXME (trb 03/18/21): This is ... not great. We need to
     // unravel the "fake" polymorphism in the model non-hierarchy
     // soon.
+
+    std::cout << "Mutating" << std::endl;
     
     // Dont copy partner model but mutate local losing model 
     // Mutation Strategy decided by m_mutate_algo
@@ -432,8 +434,48 @@ ExchangeStrategyFactory& get_exchange_factory()
   return factory;
 }
 
+using MutationStrategyFactory = lbann::generic_factory<
+  lbann::ltfb::MutationStrategy,
+  std::string,
+  lbann::proto::generate_builder_type<
+    lbann::ltfb::MutationStrategy,
+    std::set<std::string>,
+    google::protobuf::Message const&>>;
+
+std::unique_ptr<lbann::ltfb::NullMutation>
+make_null_mutation(google::protobuf::Message const& msg)
+{
+  using NullMutation = lbann_data::MutationStrategy::NullMutation;
+  LBANN_ASSERT(dynamic_cast<NullMutation const*>(&msg));
+  return std::make_unique<lbann::ltfb::NullMutation>();  
+}
+
+std::unique_ptr<lbann::ltfb::ReplaceActivation>
+make_replace_activation(google::protobuf::Message const& msg)
+{
+  using ReplaceActivation = lbann_data::MutationStrategy::ReplaceActivation;
+  auto const& params = dynamic_cast<ReplaceActivation const&>(msg);
+  return std::make_unique<lbann::ltfb::ReplaceActivation>(params.old_layer_type(),
+                                                          params.new_layer_type());
+}
+
+MutationStrategyFactory build_default_mutation_factory()
+{
+  MutationStrategyFactory factory;
+  factory.register_builder("NullMutation", make_null_mutation);
+  factory.register_builder("ReplaceActivation", make_replace_activation);
+  return factory;
+}
+
+MutationStrategyFactory& get_mutation_factory()
+{
+  static MutationStrategyFactory factory = build_default_mutation_factory();
+  return factory;
+}
+
 } // namespace
 
+// For ExchangeStrategy
 template <>
 std::unique_ptr<lbann::ltfb::RandomPairwiseExchange::ExchangeStrategy>
 lbann::make_abstract<lbann::ltfb::RandomPairwiseExchange::ExchangeStrategy>(
@@ -455,6 +497,22 @@ lbann::make_abstract<lbann::ltfb::RandomPairwiseExchange::ExchangeStrategy>(
     exchange_params);
 }
 
+// For MutationStrategy
+template <>
+std::unique_ptr<lbann::ltfb::MutationStrategy>
+lbann::make_abstract<lbann::ltfb::MutationStrategy>(
+  const google::protobuf::Message& msg)
+{
+  using ProtoStrategy = lbann_data::MutationStrategy;
+  auto const& params = dynamic_cast<ProtoStrategy const&>(msg);
+
+  auto const& mutate_params = 
+    proto::helpers::get_oneof_message(params, "strategy");
+  return get_mutation_factory().create_object(
+    proto::helpers::message_type(mutate_params),
+    mutate_params);
+}
+
 template <>
 std::unique_ptr<lbann::ltfb::RandomPairwiseExchange>
 lbann::make<lbann::ltfb::RandomPairwiseExchange>(
@@ -463,6 +521,9 @@ lbann::make<lbann::ltfb::RandomPairwiseExchange>(
   auto const& params = dynamic_cast<google::protobuf::Any const&>(msg_in);
   lbann_data::RandomPairwiseExchange msg;
   LBANN_ASSERT(params.UnpackTo(&msg));
+
+  lbann_data::MutationStrategy msg2;
+  LBANN_ASSERT(params.UnpackTo(&msg2));
 
   // Copy the metric map into LBANN format.
   using MetricStrategy = ltfb::RandomPairwiseExchange::metric_strategy;
@@ -478,7 +539,10 @@ lbann::make<lbann::ltfb::RandomPairwiseExchange>(
 
   using ExchangeStrategyType =
     lbann::ltfb::RandomPairwiseExchange::ExchangeStrategy;
+  using MutationStrategyType = 
+    lbann::ltfb::MutationStrategy;
   return make_unique<lbann::ltfb::RandomPairwiseExchange>(
     std::move(metric_map),
-    make_abstract<ExchangeStrategyType>(msg.exchange_strategy()), std::make_unique<ltfb::NullMutation>());
+    make_abstract<ExchangeStrategyType>(msg.exchange_strategy()),
+    make_abstract<MutationStrategyType>(msg2.mutation_strategy()));
 }
