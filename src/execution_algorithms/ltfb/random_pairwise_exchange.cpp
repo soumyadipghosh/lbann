@@ -439,7 +439,6 @@ using MutationStrategyFactory = lbann::generic_factory<
   std::string,
   lbann::proto::generate_builder_type<
     lbann::ltfb::MutationStrategy,
-    std::set<std::string>,
     google::protobuf::Message const&>>;
 
 std::unique_ptr<lbann::ltfb::NullMutation>
@@ -522,9 +521,6 @@ lbann::make<lbann::ltfb::RandomPairwiseExchange>(
   lbann_data::RandomPairwiseExchange msg;
   LBANN_ASSERT(params.UnpackTo(&msg));
 
-  lbann_data::MutationStrategy msg2;
-  LBANN_ASSERT(params.UnpackTo(&msg2));
-
   // Copy the metric map into LBANN format.
   using MetricStrategy = ltfb::RandomPairwiseExchange::metric_strategy;
   std::unordered_map<std::string, MetricStrategy> metric_map;
@@ -544,5 +540,5 @@ lbann::make<lbann::ltfb::RandomPairwiseExchange>(
   return make_unique<lbann::ltfb::RandomPairwiseExchange>(
     std::move(metric_map),
     make_abstract<ExchangeStrategyType>(msg.exchange_strategy()),
-    make_abstract<MutationStrategyType>(msg2.mutation_strategy()));
+    make_abstract<MutationStrategyType>(msg.mutation_strategy()));
 }

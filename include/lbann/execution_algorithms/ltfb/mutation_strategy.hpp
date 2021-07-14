@@ -115,7 +115,12 @@ public:
 
     // Find all old layer type names
     for (int i=0; i<m.get_num_layers(); ++i) {
-       if (m.get_layer(i).get_type() == m_old_layer_type) {
+       // Creating a temp string with lower case representation
+       std::string temp_type = m.get_layer(i).get_type();
+       std::transform(temp_type.begin(), temp_type.end(),
+                                         temp_type.begin(), ::tolower);    
+
+       if (temp_type == m_old_layer_type) {
          all_old_layer_type_names.push_back(m.get_layer(i).get_name());
        }
     }
