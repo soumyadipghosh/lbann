@@ -31,6 +31,9 @@
 #include "lbann/layers/activations/relu.hpp"
 #include "lbann/layers/activations/softmax.hpp"
 
+#include "lbann/layers/learning/fully_connected.hpp"
+#include "lbann/layers/learning/convolution.hpp"
+
 namespace lbann {
 namespace ltfb {
 
@@ -68,7 +71,7 @@ public:
   ReplaceActivation(std::string const& old_layer_type, std::string const& new_layer_type)
          : m_old_layer_type{old_layer_type}, m_new_layer_type{new_layer_type}
   {
-    // Convert to lower case for eaasy comparison
+    // Convert to lower case for easy comparison
     std::transform(m_old_layer_type.begin(), m_old_layer_type.end(), 
                                              m_old_layer_type.begin(), ::tolower);
     std::transform(m_new_layer_type.begin(), m_new_layer_type.end(), 
@@ -133,6 +136,52 @@ public:
        // Call replace for each of them
        m.replace_layer(make_new_activation_layer(comm, new_layer_name), all_old_layer_type_names[i]);
     }
+  }
+};
+
+// Replace Learnable Layers
+class ReplaceLearnable : public Cloneable<ReplaceLearnable, MutationStrategy>
+{
+public:
+  ReplaceLearnable() = default;
+
+  std::unique_ptr<lbann::Layer> make_new_learnable_layer(lbann::lbann_comm& comm,
+                                                  std::string const& name)
+  {
+    auto layer = std::make_unique<
+      lbann::fully_connected_layer<float, data_layout::DATA_PARALLEL, El::Device::GPU>>
+                                  (120, false, nullptr, true);
+    layer->set_name(name);
+    return layer;
+  }
+
+  void mutate(model& m)
+  {
+    auto& comm = *m.get_comm();
+
+    std::vector<std::string> learnable_layer_names;
+
+    // Find the first fully connected layer and replace it with a new one
+    for (auto i=0; i<m.get_num_layers(); ++i) {
+       // Creating a temp string with lower case representation
+       std::string temp_type = m.get_layer(i).get_type();
+       std::transform(temp_type.begin(), temp_type.end(),
+                                         temp_type.begin(), ::tolower);  
+       
+       if (temp_type == "fully connected") {
+         learnable_layer_names.push_back(m.get_layer(i).get_name());
+         break; // just the first fc for now
+       }   
+     }
+
+     // Replace with new layers
+     for (size_t i=0UL; i<learnable_layer_names.size(); i++) {
+        std::string new_layer_name = "new_fc " + std::to_string(i);
+
+        std::cout << "Attempting to replace " << learnable_layer_names[i] << std::endl;
+        // Call replace for each of them
+        m.replace_layer(make_new_learnable_layer(comm, new_layer_name), learnable_layer_names[i]);
+     }
   }
 };
 

@@ -212,6 +212,9 @@ class MutationStrategy:
             #msg.replace_activation.CopyFrom(ReplaceActivationMsg())
             msg.replace_activation.old_layer_type = self.old_layer_type
             msg.replace_activation.new_layer_type = self.new_layer_type
+        elif self.strategy == "replace_learnable":
+            ReplaceLearnableMsg = MutationStrategyMsg.ReplaceLearnable
+            msg.replace_learnable.CopyFrom(ReplaceLearnableMsg())
         else:
             raise ValueError("Unknown Strategy")
         return msg

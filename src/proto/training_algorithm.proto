@@ -75,9 +75,13 @@ message MutationStrategy {
     string new_layer_type = 2;
   }
 
+  message ReplaceLearnable {
+  }
+
   oneof strategy {
     NullMutation null_mutation = 1;
     ReplaceActivation replace_activation = 2;
+    ReplaceLearnable replace_learnable = 3;
   }
 } //message Mutation Strategy
 

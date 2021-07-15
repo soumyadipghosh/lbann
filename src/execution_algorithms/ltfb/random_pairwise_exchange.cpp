@@ -458,11 +458,20 @@ make_replace_activation(google::protobuf::Message const& msg)
                                                           params.new_layer_type());
 }
 
+std::unique_ptr<lbann::ltfb::ReplaceLearnable>
+make_replace_learnable(google::protobuf::Message const& msg)
+{
+  using ReplaceLearnable = lbann_data::MutationStrategy::ReplaceLearnable;
+  LBANN_ASSERT(dynamic_cast<ReplaceLearnable const*>(&msg));
+  return std::make_unique<lbann::ltfb::ReplaceLearnable>();
+}
+
 MutationStrategyFactory build_default_mutation_factory()
 {
   MutationStrategyFactory factory;
   factory.register_builder("NullMutation", make_null_mutation);
   factory.register_builder("ReplaceActivation", make_replace_activation);
+  factory.register_builder("ReplaceLearnable", make_replace_learnable);
   return factory;
 }
 
