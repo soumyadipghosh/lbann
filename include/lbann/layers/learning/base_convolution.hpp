@@ -100,6 +100,8 @@ public:
   const std::vector<int>& get_pads() const { return m_pads; }
   const std::vector<int>& get_strides() const { return m_strides; }
   const std::vector<int>& get_dilations() const { return m_dilations; }
+  const int& get_channels() const { return m_output_channels; }
+  const int& get_groups() const { return m_groups; }
 
 protected:
 

@@ -32,7 +32,10 @@
 #include "lbann/layers/activations/softmax.hpp"
 
 #include "lbann/layers/learning/fully_connected.hpp"
+#include "lbann/layers/learning/base_convolution.hpp"
 #include "lbann/layers/learning/convolution.hpp"
+
+#include "lbann/layers/transform/reshape.hpp"
 
 namespace lbann {
 namespace ltfb {
@@ -151,6 +154,12 @@ public:
     auto layer = std::make_unique<
       lbann::fully_connected_layer<float, data_layout::DATA_PARALLEL, El::Device::GPU>>
                                   (120, false, nullptr, true);
+    /*
+    std::vector<int> layer_dims{5,5}, layer_pads{0,0}, layer_strides{1,1}, layer_dilations{1,1};
+    auto layer = std::make_unique<
+      lbann::convolution_layer<float, data_layout::DATA_PARALLEL, El::Device::GPU>>
+                            (2, 6, layer_dims, layer_pads, layer_strides, layer_dilations, 1, true);
+    */
     layer->set_name(name);
     return layer;
   }
@@ -167,22 +176,203 @@ public:
        std::string temp_type = m.get_layer(i).get_type();
        std::transform(temp_type.begin(), temp_type.end(),
                                          temp_type.begin(), ::tolower);  
+
+       /*
+       // Print output dims of all layers
+       std::vector<int> od = m.get_layer(i).get_output_dims(0);
+       int sz = m.get_layer(i).get_output_size(0);
+       std::cout << " Size of layer - " << sz << std::endl;
+       std::cout << " Dims of layer - ";
+       for (size_t j=0UL; j < od.size(); j++) std::cout << od[j] << " ";
+       std::cout << std::endl;
+       */
        
        if (temp_type == "fully connected") {
+       // if (temp_type == "convolution") {
          learnable_layer_names.push_back(m.get_layer(i).get_name());
-         break; // just the first fc for now
+         //break; // just the first fc for now
        }   
      }
 
      // Replace with new layers
-     for (size_t i=0UL; i<learnable_layer_names.size(); i++) {
-        std::string new_layer_name = "new_fc " + std::to_string(i);
+     std::string new_layer_name = "new_fc";
+     //std::string new_layer_name = "new_conv";
 
-        std::cout << "Attempting to replace " << learnable_layer_names[i] << std::endl;
-        // Call replace for each of them
-        m.replace_layer(make_new_learnable_layer(comm, new_layer_name), learnable_layer_names[i]);
-     }
+     // just first layer
+     std::cout << "Attempting to replace " << learnable_layer_names[0] << std::endl;
+     // Call replace for each of them
+     m.replace_layer(make_new_learnable_layer(comm, new_layer_name), learnable_layer_names[0]);
   }
+};
+
+// Insert Conv layers - assume we insert a 3rd conv layer in Lenet
+class InsertConv : public Cloneable<InsertConv, MutationStrategy>
+{
+public:
+  InsertConv() = default;
+
+  std::unique_ptr<lbann::Layer> make_new_conv_layer(lbann::lbann_comm& comm, std::string const& name)
+  {
+    std::vector<int> layer_dims{5,5}, layer_pads{0,0}, layer_strides{1,1}, layer_dilations{1,1};
+    auto layer = std::make_unique<
+      lbann::convolution_layer<float, data_layout::DATA_PARALLEL, El::Device::GPU>>
+                            (2, 16, layer_dims, layer_pads, layer_strides, layer_dilations, 1, true);
+    layer->set_name(name);
+    return layer;
+  }
+
+  std::unique_ptr<lbann::Layer> make_new_fc_layer(lbann::lbann_comm& comm, std::string const& name)
+  {
+    auto layer = std::make_unique<
+      lbann::fully_connected_layer<float, data_layout::DATA_PARALLEL, El::Device::GPU>>
+                                  (4056, false, nullptr, true);
+    layer->set_name(name);
+    return layer;
+  }
+
+  std::unique_ptr<lbann::Layer> make_new_relu_layer(lbann::lbann_comm& comm, std::string const& name)
+  {
+    auto layer = std::make_unique<
+      lbann::relu_layer<float, data_layout::DATA_PARALLEL, El::Device::CPU>>(
+      &comm);    
+    layer->set_name(name);
+    return layer;
+  }
+
+  std::unique_ptr<lbann::Layer> make_new_reshape_layer(lbann::lbann_comm& comm,
+                                                       std::string const& name, std::vector<int> dims)
+  {
+    auto layer = std::make_unique<
+      lbann::reshape_layer<float, data_layout::DATA_PARALLEL, El::Device::CPU>>(&comm, dims);
+    layer->set_name(name);
+    return layer;
+  }
+ 
+  void mutate(model& m)
+  {
+    auto& comm = *m.get_comm();
+    //auto& trainer = lbann::get_trainer();
+    //auto&& metadata = trainer.get_data_coordinator().get_dr_metadata();
+
+    std::vector<std::string> pooling_layer_names;   
+    std::vector<std::string> conv_layer_names; 
+    std::vector<int> conv_layer_indices;
+
+    // Find the names of the pooling layers
+    for (auto i=0; i<m.get_num_layers(); ++i) {
+       // Creating a temp string with lower case representation
+       std::string temp_type = m.get_layer(i).get_type();
+       std::transform(temp_type.begin(), temp_type.end(),
+                                         temp_type.begin(), ::tolower);
+
+       if (temp_type == "pooling") {
+         pooling_layer_names.push_back(m.get_layer(i).get_name());
+       }
+
+       if (temp_type == "convolution") {
+         conv_layer_names.push_back(m.get_layer(i).get_name());
+         conv_layer_indices.push_back(i);
+       }
+    }
+
+    auto prev_pool = pooling_layer_names[0];  
+    auto next_conv = conv_layer_names[1];
+    auto conv_dims = m.get_layer(conv_layer_indices[1]).get_input_dims(0);
+
+    std::string new_layer_name = "new_conv";
+
+    m.insert_layer(make_new_conv_layer(comm, new_layer_name), prev_pool);              
+    //m.setup(trainer.get_max_mini_batch_size(), metadata, true);
+
+    m.insert_layer(make_new_relu_layer(comm, "new_relu"), new_layer_name);
+
+    // Check and insert shimming FC layers before and after
+    m.insert_layer(make_new_fc_layer(comm, "new_fc"), "new_relu");
+
+    m.insert_layer(make_new_relu_layer(comm, "new_relu2"), "new_fc");
+
+    m.insert_layer(make_new_reshape_layer(comm, "new_reshape", conv_dims), "new_relu2");
+
+    /*
+    // Print dimensions
+    for (auto i=1; i<m.get_num_layers(); ++i) {
+       std::vector<int> id = m.get_layer(i).get_input_dims(0);
+       std::vector<int> od = m.get_layer(i).get_output_dims(0);
+       int isz = m.get_layer(i).get_input_size(0);
+       int osz = m.get_layer(i).get_output_size(0);
+
+       std::cout << " I/P " << i << " : size - " << isz;
+       std::cout << " dims - ";
+       for (size_t j=0UL; j < id.size(); j++) std::cout << id[j] << " ";
+       std::cout << std::endl;
+
+       std::cout << " O/P " << i << " : size - " << osz;
+       std::cout << " dims - ";
+       for (size_t j=0UL; j < od.size(); j++) std::cout << od[j] << " ";
+       std::cout << std::endl;
+    }
+    */
+    
+  }
+};
+
+// Replace Kernel in Conv
+class ReplaceKernelConv : public Cloneable<ReplaceKernelConv, MutationStrategy>
+{
+
+public:
+  ReplaceKernelConv() = default;
+
+  std::unique_ptr<lbann::Layer> make_new_conv_layer(lbann::lbann_comm& comm, int const& kernel,
+                                                    int const& channels, std::string const& name)
+  {
+    int diff = kernel - 2; // (new - (old - 1)); since old kernel is 3 for both conv layers, (3-1) is hard-coded
+    std::vector<int> layer_dims{kernel, kernel}, layer_pads{(diff - 1)/2, (diff - 1)/2},
+                     layer_strides{1,1}, layer_dilations{1,1};
+    auto layer = std::make_unique<
+      lbann::convolution_layer<float, data_layout::DATA_PARALLEL, El::Device::GPU>>
+                            (2, channels, layer_dims, layer_pads, layer_strides, layer_dilations, 1, true);
+    layer->set_name(name);
+    return layer;
+  }
+
+  // Find all conv layers and replace them with a conv layer of different kernel and suitable padding
+  void mutate(model& m)
+  {
+    auto& comm = *m.get_comm();
+
+    std::vector<int> kernel_sizes = {5}; // using just one kernel size for now
+    std::vector<int> conv_layer_indices; // indices of all conv layers
+
+    for (auto i = 0; i < m.get_num_layers(); ++i) {
+       // Creating a temp string with lower case representation
+       std::string temp_type = m.get_layer(i).get_type();
+       std::transform(temp_type.begin(), temp_type.end(),
+                                         temp_type.begin(), ::tolower); 
+
+       if (temp_type == "convolution") {
+         conv_layer_indices.push_back(i);
+       }
+    }
+
+    // If conv_index is random and becomes different for different trainers, I get the hang
+    // If I force them to be same, no hang!
+    int conv_index = fast_rand_int(get_fast_generator(), conv_layer_indices.size());
+    int kernel_index = fast_rand_int(get_fast_generator(), kernel_sizes.size());
+    //int conv_index = 1;
+    //int kernel_index = 0;
+    std::cout << "Conv index - " << conv_index << ", Kernel index - " << kernel_index << std::endl;
+
+    auto& layer = m.get_layer(conv_layer_indices[conv_index]);
+    std::string old_name = layer.get_name();
+    std::string new_name = old_name;
+    auto channels = layer.get_output_dims(0)[0];
+
+    std::cout << "Replacing " << old_name << " with " << new_name << std::endl;
+
+    m.replace_layer(make_new_conv_layer(comm, kernel_sizes[kernel_index], channels, new_name),
+                    old_name);                        
+  }    
 };
 
 } // namespace ltfb

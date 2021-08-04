@@ -78,10 +78,18 @@ message MutationStrategy {
   message ReplaceLearnable {
   }
 
+  message InsertConv {
+  }
+
+  message ReplaceKernelConv {
+  }
+
   oneof strategy {
     NullMutation null_mutation = 1;
     ReplaceActivation replace_activation = 2;
     ReplaceLearnable replace_learnable = 3;
+    InsertConv insert_conv = 4;
+    ReplaceKernelConv replace_kernel_conv = 5;
   }
 } //message Mutation Strategy
 

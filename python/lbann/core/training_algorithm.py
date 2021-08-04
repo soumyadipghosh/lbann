@@ -215,6 +215,12 @@ class MutationStrategy:
         elif self.strategy == "replace_learnable":
             ReplaceLearnableMsg = MutationStrategyMsg.ReplaceLearnable
             msg.replace_learnable.CopyFrom(ReplaceLearnableMsg())
+        elif self.strategy == "insert_conv":
+            InsertConvMsg = MutationStrategyMsg.InsertConv
+            msg.insert_conv.CopyFrom(InsertConvMsg())       
+        elif self.strategy == "replace_kernel_conv":
+            ReplaceKernelConvMsg = MutationStrategyMsg.ReplaceKernelConv
+            msg.replace_kernel_conv.CopyFrom(ReplaceKernelConvMsg()) 
         else:
             raise ValueError("Unknown Strategy")
         return msg

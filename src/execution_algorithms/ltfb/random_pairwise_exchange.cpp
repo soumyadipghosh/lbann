@@ -312,6 +312,10 @@ void RandomPairwiseExchange::select_next(model& m,
     // FIXME (trb 03/18/21): This is ... not great. We need to
     // unravel the "fake" polymorphism in the model non-hierarchy
     // soon.
+    using DAGModel = directed_acyclic_graph_model;
+    auto& local_model = dynamic_cast<DAGModel&>(m);
+    auto& partner_dag_model = dynamic_cast<DAGModel&>(*partner_model);
+    local_model = std::move(partner_dag_model);
 
     std::cout << "Mutating" << std::endl;
     
@@ -325,17 +329,25 @@ void RandomPairwiseExchange::select_next(model& m,
     m.setup(trainer.get_max_mini_batch_size(),
             metadata,
             true);
-    
-    /*
-    using DAGModel = directed_acyclic_graph_model;
-    auto& local_model = dynamic_cast<DAGModel&>(m);
-    auto& partner_dag_model = dynamic_cast<DAGModel&>(*partner_model);
-    local_model = std::move(partner_dag_model);
-    auto& trainer = get_trainer();
-    auto&& metadata = trainer.get_data_coordinator().get_dr_metadata();
-    m.setup(trainer.get_max_mini_batch_size(),
-            metadata,
-            true);
+
+    /* 
+    // Print dimensions
+    for (auto i=1; i<m.get_num_layers(); ++i) {
+       std::vector<int> id = m.get_layer(i).get_input_dims(0);
+       std::vector<int> od = m.get_layer(i).get_output_dims(0);
+       int isz = m.get_layer(i).get_input_size(0);
+       int osz = m.get_layer(i).get_output_size(0);
+
+       std::cout << " I/P " << i << " : size - " << isz;
+       std::cout << " dims - ";
+       for (size_t j=0UL; j < id.size(); j++) std::cout << id[j] << " ";
+       std::cout << std::endl;
+
+       std::cout << " O/P " << i << " : size - " << osz;
+       std::cout << " dims - ";
+       for (size_t j=0UL; j < od.size(); j++) std::cout << od[j] << " ";
+       std::cout << std::endl;
+    }
     */
   }
  
@@ -466,12 +478,30 @@ make_replace_learnable(google::protobuf::Message const& msg)
   return std::make_unique<lbann::ltfb::ReplaceLearnable>();
 }
 
+std::unique_ptr<lbann::ltfb::InsertConv>
+make_insert_conv(google::protobuf::Message const& msg)
+{
+  using InsertConv = lbann_data::MutationStrategy::InsertConv;
+  LBANN_ASSERT(dynamic_cast<InsertConv const*>(&msg));
+  return std::make_unique<lbann::ltfb::InsertConv>();
+}
+
+std::unique_ptr<lbann::ltfb::ReplaceKernelConv>
+make_replace_kernel_conv(google::protobuf::Message const& msg)
+{
+  using ReplaceKernelConv = lbann_data::MutationStrategy::ReplaceKernelConv;
+  LBANN_ASSERT(dynamic_cast<ReplaceKernelConv const*>(&msg));
+  return std::make_unique<lbann::ltfb::ReplaceKernelConv>();
+}
+
 MutationStrategyFactory build_default_mutation_factory()
 {
   MutationStrategyFactory factory;
   factory.register_builder("NullMutation", make_null_mutation);
   factory.register_builder("ReplaceActivation", make_replace_activation);
   factory.register_builder("ReplaceLearnable", make_replace_learnable);
+  factory.register_builder("InsertConv", make_insert_conv);
+  factory.register_builder("ReplaceKernelConv", make_replace_kernel_conv);
   return factory;
 }
 

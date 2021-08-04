@@ -451,8 +451,23 @@ void model::add_weights(OwningWeightsPtr&& ptr) {
 
 }
 
-void model::add_callback(std::shared_ptr<callback_base> cb) {
-  if (cb == nullptr) {
+void model::remove_weights(std::string const& removable_weight_name) {
+  auto const removable_weight_iterator = std::find_if(
+                             cbegin(m_weights),
+                             cend(m_weights),
+                             [&removable_weight_name](auto const& w) {
+                               return w->get_name() == removable_weight_name;
+                             });
+  if (removable_weight_iterator != cend(m_weights))
+    m_weights.erase(removable_weight_iterator);
+  else 
+    LBANN_ERROR(
+      "Attempted to remove weight",
+      " \"", removable_weight_name, "\", ",
+      "but no such weight exists");
+}
+
+void model::add_callback(std::shared_ptr<callback_base> cb) {  if (cb == nullptr) {
     LBANN_ERROR(
       "attempted to add a null pointer as callback to ",
       "model \"",get_name(),"\"");
@@ -1922,11 +1937,24 @@ void model::replace_layer(OwningLayerPtr&& new_layer, std::string const& old_lay
   parent.replace_child_layer(new_layer, parent.find_child_layer_index(l));
   new_layer->add_parent_layer(m_layers[old_layer_index-1]);
 
-  // Add new layer to layer list
-  add_layer(std::move(new_layer));
+  // Remove weights for the old layer
+  auto old_weights_ptrs = m_layers[old_layer_index]->get_weights_pointers();
+  for (const auto w : old_weights_ptrs) {
+     this->remove_weights(std::shared_ptr<weights>(w)->get_name());
+  }
 
   // Destroy memory of old layer - for now, remove from m_layers
   m_layers.erase(m_layers.cbegin()+old_layer_index);
+
+  // Add new layer to layer list
+  add_layer(std::move(new_layer));
+  
+  /*
+  // Copy weights from the old layer
+  for (const auto w : old_weights_ptrs) {
+     m_layers[this->get_num_layers()-1]->add_weights(w);
+  }
+  */
 }
 
 // =============================================
