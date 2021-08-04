@@ -603,7 +603,7 @@ public:
 
   ///@}
 
-protected:
+//protected:
 
   /** @name Protected lifecycle functions */
   ///@{
@@ -618,6 +618,9 @@ protected:
   void add_weights(ViewingWeightsPtr w) {
     m_weights.emplace_back(std::move(w));
   }
+
+protected:
+
   size_t num_weights() const noexcept { return m_weights.size(); }
   bool has_weights() const noexcept { return num_weights() > 0; }
   bool has_weights(size_t idx) const noexcept {

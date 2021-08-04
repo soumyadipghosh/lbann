@@ -186,6 +186,45 @@ class LTFB(TrainingAlgorithm):
         params.local_training_algorithm.CopyFrom(self.local_algo.export_proto())
         return params
 
+class MutationStrategy:
+    """The strategy for mutation after a tournament in LTFB.
+       INSERT FURTHER DESCRIPTION HERE.
+    """
+
+    def __init__(self, strategy: str = "null_mutation",
+                 old_layer_type: str = None,
+                 new_layer_type: str = None):
+
+        self.strategy = strategy
+        self.old_layer_type = old_layer_type
+        self.new_layer_type = new_layer_type
+
+    def export_proto(self):
+        """Get a protobuf representation of this object."""
+
+        MutationStrategyMsg = AlgoProto.MutationStrategy
+        msg = MutationStrategyMsg()
+        if self.strategy == "null_mutation":
+            NullMutationMsg = MutationStrategyMsg.NullMutation
+            msg.null_mutation.CopyFrom(NullMutationMsg())
+        elif self.strategy == "replace_activation":
+            #ReplaceActivationMsg = MutationStrategyMsg.ReplaceActivation
+            #msg.replace_activation.CopyFrom(ReplaceActivationMsg())
+            msg.replace_activation.old_layer_type = self.old_layer_type
+            msg.replace_activation.new_layer_type = self.new_layer_type
+        elif self.strategy == "replace_learnable":
+            ReplaceLearnableMsg = MutationStrategyMsg.ReplaceLearnable
+            msg.replace_learnable.CopyFrom(ReplaceLearnableMsg())
+        elif self.strategy == "insert_conv":
+            InsertConvMsg = MutationStrategyMsg.InsertConv
+            msg.insert_conv.CopyFrom(InsertConvMsg())       
+        elif self.strategy == "replace_kernel_conv":
+            ReplaceKernelConvMsg = MutationStrategyMsg.ReplaceKernelConv
+            msg.replace_kernel_conv.CopyFrom(ReplaceKernelConvMsg()) 
+        else:
+            raise ValueError("Unknown Strategy")
+        return msg
+
 class RandomPairwiseExchange(MetaLearningStrategy):
     """The classic LTFB pairwise tourament metalearning strategy.
 
@@ -297,7 +336,8 @@ class RandomPairwiseExchange(MetaLearningStrategy):
 
     def __init__(self,
                  metric_strategies: dict[str,int] = {},
-                 exchange_strategy = ExchangeStrategy()):
+                 exchange_strategy = ExchangeStrategy(),
+                 mutation_strategy = MutationStrategy()):
         """Construct a new RandomPairwiseExchange metalearning strategy.
 
         Args:
@@ -310,6 +350,7 @@ class RandomPairwiseExchange(MetaLearningStrategy):
 
         self.metric_strategies = metric_strategies
         self.exchange_strategy = exchange_strategy
+        self.mutation_strategy = mutation_strategy
 
     def export_proto(self):
         """Get a protobuf representation of this object."""
@@ -319,8 +360,9 @@ class RandomPairwiseExchange(MetaLearningStrategy):
             msg.metric_name_strategy_map[key] = value
 
         msg.exchange_strategy.CopyFrom(self.exchange_strategy.export_proto())
+        msg.mutation_strategy.CopyFrom(self.mutation_strategy.export_proto())
         return msg
-
+          
 class KFAC(TrainingAlgorithm):
     """Kronecker-Factored Approximate Curvature algorithm.
 

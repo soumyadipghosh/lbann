@@ -66,6 +66,33 @@ message LTFB {
   TerminationCriteria stopping_criteria = 3;
 }// message LTFB
 
+message MutationStrategy {
+  message NullMutation {
+  }
+
+  message ReplaceActivation {
+    string old_layer_type = 1;
+    string new_layer_type = 2;
+  }
+
+  message ReplaceLearnable {
+  }
+
+  message InsertConv {
+  }
+
+  message ReplaceKernelConv {
+  }
+
+  oneof strategy {
+    NullMutation null_mutation = 1;
+    ReplaceActivation replace_activation = 2;
+    ReplaceLearnable replace_learnable = 3;
+    InsertConv insert_conv = 4;
+    ReplaceKernelConv replace_kernel_conv = 5;
+  }
+} //message Mutation Strategy
+
 // The classic LTFB algorithm. Implements MetaLearningStrategy.
 message RandomPairwiseExchange {
   enum MetricStrategy {
@@ -75,6 +102,7 @@ message RandomPairwiseExchange {
 
   map<string, MetricStrategy> metric_name_strategy_map = 1;
   ExchangeStrategy exchange_strategy = 2;
+  MutationStrategy mutation_strategy = 3;
 
   // This uses the "oneof" strategy because we don't really want
   // downstreams adding strategies willy nilly.

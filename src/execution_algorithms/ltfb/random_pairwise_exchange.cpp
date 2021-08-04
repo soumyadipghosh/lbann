@@ -24,6 +24,8 @@
 // permissions and limitations under the license.
 ////////////////////////////////////////////////////////////////////////////////
 
+#include "lbann/execution_algorithms/ltfb/mutation_strategy.hpp"
+
 #include "lbann/execution_algorithms/ltfb/random_pairwise_exchange.hpp"
 
 #include "lbann/base.hpp"
@@ -134,23 +136,26 @@ bool local_wins(EvalType local,
 
 RandomPairwiseExchange::RandomPairwiseExchange(
   std::unordered_map<std::string, metric_strategy> metrics,
-  std::unique_ptr<ExchangeStrategy> comm_algo)
-  : m_metrics{std::move(metrics)}, m_comm_algo{std::move(comm_algo)}
+  std::unique_ptr<ExchangeStrategy> comm_algo,
+  std::unique_ptr<MutationStrategy> mutate_algo)
+  : m_metrics{std::move(metrics)}, m_comm_algo{std::move(comm_algo)}, m_mutate_algo{std::move(mutate_algo)}
 {
   LBANN_ASSERT(m_metrics.size());
 }
 
-RandomPairwiseExchange::RandomPairwiseExchange(
+RandomPairwiseExchange::RandomPairwiseExchange( // This calls the prev constructor
   std::string metric_name,
   metric_strategy winner_strategy,
-  std::unique_ptr<ExchangeStrategy> comm_algo)
+  std::unique_ptr<ExchangeStrategy> comm_algo,
+  std::unique_ptr<MutationStrategy> mutate_algo)
   : RandomPairwiseExchange({{metric_name, winner_strategy}},
-                           std::move(comm_algo))
+                           std::move(comm_algo), std::move(mutate_algo))
 {}
 
 RandomPairwiseExchange::RandomPairwiseExchange(
   RandomPairwiseExchange const& other)
-  : m_metrics{other.m_metrics}, m_comm_algo{other.m_comm_algo->clone()}
+  : m_metrics{other.m_metrics}, m_comm_algo{other.m_comm_algo->clone()},
+    m_mutate_algo{other.m_mutate_algo->clone()}
 {}
 
 std::unordered_map<std::string, EvalType>
@@ -311,13 +316,41 @@ void RandomPairwiseExchange::select_next(model& m,
     auto& local_model = dynamic_cast<DAGModel&>(m);
     auto& partner_dag_model = dynamic_cast<DAGModel&>(*partner_model);
     local_model = std::move(partner_dag_model);
+
+    std::cout << "Mutating" << std::endl;
+    
+    // Dont copy partner model but mutate local losing model 
+    // Mutation Strategy decided by m_mutate_algo
+    m_mutate_algo->mutate(m);    
+
+    // Setup model and env again
     auto& trainer = get_trainer();
     auto&& metadata = trainer.get_data_coordinator().get_dr_metadata();
     m.setup(trainer.get_max_mini_batch_size(),
             metadata,
-            /*force=*/true);
-  }
+            true);
 
+    /* 
+    // Print dimensions
+    for (auto i=1; i<m.get_num_layers(); ++i) {
+       std::vector<int> id = m.get_layer(i).get_input_dims(0);
+       std::vector<int> od = m.get_layer(i).get_output_dims(0);
+       int isz = m.get_layer(i).get_input_size(0);
+       int osz = m.get_layer(i).get_output_size(0);
+
+       std::cout << " I/P " << i << " : size - " << isz;
+       std::cout << " dims - ";
+       for (size_t j=0UL; j < id.size(); j++) std::cout << id[j] << " ";
+       std::cout << std::endl;
+
+       std::cout << " O/P " << i << " : size - " << osz;
+       std::cout << " dims - ";
+       for (size_t j=0UL; j < od.size(); j++) std::cout << od[j] << " ";
+       std::cout << std::endl;
+    }
+    */
+  }
+ 
   LBANN_LOG_TRAINER_MASTER(comm,
                            message_prefix,
                            "trainer ",
@@ -413,8 +446,74 @@ ExchangeStrategyFactory& get_exchange_factory()
   return factory;
 }
 
+using MutationStrategyFactory = lbann::generic_factory<
+  lbann::ltfb::MutationStrategy,
+  std::string,
+  lbann::proto::generate_builder_type<
+    lbann::ltfb::MutationStrategy,
+    google::protobuf::Message const&>>;
+
+std::unique_ptr<lbann::ltfb::NullMutation>
+make_null_mutation(google::protobuf::Message const& msg)
+{
+  using NullMutation = lbann_data::MutationStrategy::NullMutation;
+  LBANN_ASSERT(dynamic_cast<NullMutation const*>(&msg));
+  return std::make_unique<lbann::ltfb::NullMutation>();  
+}
+
+std::unique_ptr<lbann::ltfb::ReplaceActivation>
+make_replace_activation(google::protobuf::Message const& msg)
+{
+  using ReplaceActivation = lbann_data::MutationStrategy::ReplaceActivation;
+  auto const& params = dynamic_cast<ReplaceActivation const&>(msg);
+  return std::make_unique<lbann::ltfb::ReplaceActivation>(params.old_layer_type(),
+                                                          params.new_layer_type());
+}
+
+std::unique_ptr<lbann::ltfb::ReplaceLearnable>
+make_replace_learnable(google::protobuf::Message const& msg)
+{
+  using ReplaceLearnable = lbann_data::MutationStrategy::ReplaceLearnable;
+  LBANN_ASSERT(dynamic_cast<ReplaceLearnable const*>(&msg));
+  return std::make_unique<lbann::ltfb::ReplaceLearnable>();
+}
+
+std::unique_ptr<lbann::ltfb::InsertConv>
+make_insert_conv(google::protobuf::Message const& msg)
+{
+  using InsertConv = lbann_data::MutationStrategy::InsertConv;
+  LBANN_ASSERT(dynamic_cast<InsertConv const*>(&msg));
+  return std::make_unique<lbann::ltfb::InsertConv>();
+}
+
+std::unique_ptr<lbann::ltfb::ReplaceKernelConv>
+make_replace_kernel_conv(google::protobuf::Message const& msg)
+{
+  using ReplaceKernelConv = lbann_data::MutationStrategy::ReplaceKernelConv;
+  LBANN_ASSERT(dynamic_cast<ReplaceKernelConv const*>(&msg));
+  return std::make_unique<lbann::ltfb::ReplaceKernelConv>();
+}
+
+MutationStrategyFactory build_default_mutation_factory()
+{
+  MutationStrategyFactory factory;
+  factory.register_builder("NullMutation", make_null_mutation);
+  factory.register_builder("ReplaceActivation", make_replace_activation);
+  factory.register_builder("ReplaceLearnable", make_replace_learnable);
+  factory.register_builder("InsertConv", make_insert_conv);
+  factory.register_builder("ReplaceKernelConv", make_replace_kernel_conv);
+  return factory;
+}
+
+MutationStrategyFactory& get_mutation_factory()
+{
+  static MutationStrategyFactory factory = build_default_mutation_factory();
+  return factory;
+}
+
 } // namespace
 
+// For ExchangeStrategy
 template <>
 std::unique_ptr<lbann::ltfb::RandomPairwiseExchange::ExchangeStrategy>
 lbann::make_abstract<lbann::ltfb::RandomPairwiseExchange::ExchangeStrategy>(
@@ -434,6 +533,22 @@ lbann::make_abstract<lbann::ltfb::RandomPairwiseExchange::ExchangeStrategy>(
     proto::helpers::message_type(exchange_params),
     std::move(weights_names),
     exchange_params);
+}
+
+// For MutationStrategy
+template <>
+std::unique_ptr<lbann::ltfb::MutationStrategy>
+lbann::make_abstract<lbann::ltfb::MutationStrategy>(
+  const google::protobuf::Message& msg)
+{
+  using ProtoStrategy = lbann_data::MutationStrategy;
+  auto const& params = dynamic_cast<ProtoStrategy const&>(msg);
+
+  auto const& mutate_params = 
+    proto::helpers::get_oneof_message(params, "strategy");
+  return get_mutation_factory().create_object(
+    proto::helpers::message_type(mutate_params),
+    mutate_params);
 }
 
 template <>
@@ -459,7 +574,10 @@ lbann::make<lbann::ltfb::RandomPairwiseExchange>(
 
   using ExchangeStrategyType =
     lbann::ltfb::RandomPairwiseExchange::ExchangeStrategy;
+  using MutationStrategyType = 
+    lbann::ltfb::MutationStrategy;
   return make_unique<lbann::ltfb::RandomPairwiseExchange>(
     std::move(metric_map),
-    make_abstract<ExchangeStrategyType>(msg.exchange_strategy()));
+    make_abstract<ExchangeStrategyType>(msg.exchange_strategy()),
+    make_abstract<MutationStrategyType>(msg.mutation_strategy()));
 }
