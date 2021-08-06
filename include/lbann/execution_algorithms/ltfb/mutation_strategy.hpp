@@ -323,6 +323,7 @@ class ReplaceKernelConv : public Cloneable<ReplaceKernelConv, MutationStrategy>
 public:
   ReplaceKernelConv() = default;
 
+  /*
   std::unique_ptr<lbann::Layer> make_new_conv_layer(lbann::lbann_comm& comm, int const& kernel,
                                                     int const& channels, std::string const& name)
   {
@@ -335,13 +336,26 @@ public:
     layer->set_name(name);
     return layer;
   }
+  */
+
+  std::unique_ptr<lbann::Layer> make_new_conv_layer(lbann::lbann_comm& comm, int const& kernel,
+                                                    int const& channels, std::string const& name)
+  {
+    std::vector<int> layer_dims{kernel, kernel}, layer_pads{0, 0}, layer_strides{1, 1}, layer_dilations{1, 1};
+    auto layer = std::make_unique<
+      lbann::convolution_layer<float, data_layout::DATA_PARALLEL, El::Device::GPU>>
+                            (2, channels, layer_dims, layer_pads, layer_strides, layer_dilations, 1, true);
+    layer->set_name(name);
+    return layer;
+  }
 
   // Find all conv layers and replace them with a conv layer of different kernel and suitable padding
   void mutate(model& m)
   {
     auto& comm = *m.get_comm();
 
-    std::vector<int> kernel_sizes = {5}; // using just one kernel size for now
+    std::vector<int> kernel_sizes = {7}; // using just one kernel size for now
+    std::vector<int> channels = {10, 12};
     std::vector<int> conv_layer_indices; // indices of all conv layers
 
     for (auto i = 0; i < m.get_num_layers(); ++i) {
@@ -349,29 +363,93 @@ public:
        std::string temp_type = m.get_layer(i).get_type();
        std::transform(temp_type.begin(), temp_type.end(),
                                          temp_type.begin(), ::tolower); 
+      
+       std::string temp_name = m.get_layer(i).get_name();
+       // Ensure that conv shim layers are not counted here
 
-       if (temp_type == "convolution") {
+       if (temp_type == "convolution" && (temp_name.find("shim") == std::string::npos)) {
          conv_layer_indices.push_back(i);
        }
     }
 
-    // If conv_index is random and becomes different for different trainers, I get the hang
-    // If I force them to be same, no hang!
-    int conv_index = fast_rand_int(get_fast_generator(), conv_layer_indices.size());
-    int kernel_index = fast_rand_int(get_fast_generator(), kernel_sizes.size());
-    //int conv_index = 1;
-    //int kernel_index = 0;
-    std::cout << "Conv index - " << conv_index << ", Kernel index - " << kernel_index << std::endl;
+    /* // For just kernel
+    int conv_index;
+    int kernel_index;
+    if (m.get_comm()->am_trainer_master()) {
+      conv_index = fast_rand_int(get_fast_generator(), conv_layer_indices.size());
+      kernel_index = fast_rand_int(get_fast_generator(), kernel_sizes.size());
+    }
+    m.get_comm()->trainer_broadcast(m.get_comm()->get_trainer_master(), conv_index);
+    m.get_comm()->trainer_broadcast(m.get_comm()->get_trainer_master(), kernel_index);
 
     auto& layer = m.get_layer(conv_layer_indices[conv_index]);
     std::string old_name = layer.get_name();
     std::string new_name = old_name;
     auto channels = layer.get_output_dims(0)[0];
 
-    std::cout << "Replacing " << old_name << " with " << new_name << std::endl;
+    std::cout << "Changing kernel size in " << old_name << " to " << kernel_sizes[kernel_index]
+                                   << " in trainer " << m.get_comm()->get_trainer_rank() << std::endl;
 
     m.replace_layer(make_new_conv_layer(comm, kernel_sizes[kernel_index], channels, new_name),
-                    old_name);                        
+                    old_name);   
+    */
+
+    int conv_index;
+    int channel_index;
+    if (m.get_comm()->am_trainer_master()) {
+      conv_index = fast_rand_int(get_fast_generator(), conv_layer_indices.size());
+      channel_index = fast_rand_int(get_fast_generator(), channels.size());
+    }
+    m.get_comm()->trainer_broadcast(m.get_comm()->get_trainer_master(), conv_index);
+    m.get_comm()->trainer_broadcast(m.get_comm()->get_trainer_master(), channel_index);
+
+    auto& layer = m.get_layer(conv_layer_indices[conv_index]);
+    std::string old_name = layer.get_name();
+    std::string new_name = old_name;
+    auto old_channels = layer.get_output_dims(0)[0];
+    using base_conv = lbann::base_convolution_layer<DataType, El::Device::GPU>;
+    auto& cast_layer = dynamic_cast<base_conv&>(layer);
+    auto kernel = cast_layer.get_conv_dims()[0];
+
+    std::cout << "Changing channels in " << old_name << " from " << old_channels
+              << " to " << channels[channel_index] << std::endl;
+
+    // Store the child of the conv layer before replacing it
+    auto& child = layer.get_child_layer(0);
+   
+    // Replace the channels in the conv layer
+    m.replace_layer(make_new_conv_layer(comm, kernel, channels[channel_index], new_name),
+                    old_name);
+ 
+    // Find out if there is a shim layer. If not, insert a shim 1x1 conv layer to match channels
+    if (child.get_name().find("shim") != std::string::npos) { // if already there
+
+      std::cout << "Replacing shim" << std::endl;
+      
+      std::string shim_layer_name = child.get_name();
+
+      // Find child of shim layer
+      auto& child_of_shim = child.get_child_layer(0);
+      auto child_of_shim_channels = child_of_shim.get_input_dims(0)[0];
+
+      //replace shim layer; o/p channels stay same but i/p channels change
+      m.remove_layer(shim_layer_name);
+      m.insert_layer(make_new_conv_layer(comm, 1, child_of_shim_channels, shim_layer_name),
+                     new_name); 
+      //m.replace_layer(make_new_conv_layer(comm, 1, child_of_shim_channels, shim_layer_name),
+      //                shim_layer_name);
+
+    }
+    else { // if not, create a new shim layer. Should enter this only once
+
+      std::cout << "Creating shim" << std::endl;
+
+      // old_channels should be equal to child_of_shim_channels since
+      // this block should get executed only once
+      std::string shim_layer_name = new_name + "_shim";
+      m.insert_layer(make_new_conv_layer(comm, 1, old_channels, shim_layer_name),
+                     new_name);  
+    }                     
   }    
 };
 

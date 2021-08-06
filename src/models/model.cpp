@@ -1896,6 +1896,12 @@ void model::remove_layer(std::string const& removable_layer_name) {
   child.replace_parent_layer(l.get_parent_layer_pointer(0), child.find_parent_layer_index(l));
   parent.replace_child_layer(l.get_child_layer_pointer(0), parent.find_child_layer_index(l));
 
+  // Remove weights for the old layer
+  auto old_weights_ptrs = m_layers[removable_layer_index]->get_weights_pointers();
+  for (const auto w : old_weights_ptrs) {
+     this->remove_weights(std::shared_ptr<weights>(w)->get_name());
+  }
+
   // Destroy memory of removable layer - for now, remove from m_layers
   m_layers.erase(m_layers.cbegin()+removable_layer_index); 
 }
@@ -1948,8 +1954,8 @@ void model::replace_layer(OwningLayerPtr&& new_layer, std::string const& old_lay
 
   // Add new layer to layer list
   add_layer(std::move(new_layer));
-  
-  /*
+
+  /*  
   // Copy weights from the old layer
   for (const auto w : old_weights_ptrs) {
      m_layers[this->get_num_layers()-1]->add_weights(w);
